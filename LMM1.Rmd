@@ -1,0 +1,226 @@
+---
+title: "Linear Mixed Model 1"
+author: "Amy Kim - atykim@ucdavis.edu"
+date: "10/30/2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Linear Mixed Model
+$$\mathbf{Y} = \mathbf{X\beta} + \mathbf{Z\alpha} + \mathbf{\epsilon}$$
+where $E(\alpha_i) = 0, Var(\alpha_i) = \sigma^2, E(\epsilon_{ij}) = 0, Var(\epsilon_{ij}) = \tau^2$ 
+
+Comparing with Linear Model $\mathbf{Y} = \mathbf{X\beta} + \mathbf{\epsilon}$
+
+##0. Estimator
+
+###(a). Maximum Likelihood Estimator (MLE)
+
+###(b). Restricted Maximum Likelihood Estimator (REML)
+
+##1. Example
+
+```{r, echo = FALSE}
+library(nlme)
+library(lme4)
+library(knitr)
+#Read the data
+corps = read.table("./Data/corps.txt", header = TRUE)
+chairman = factor(rep(1:50, each = 2)) #factor: random effect
+corps$chairman = chairman
+corps$year = as.factor(corps$year)
+```
+
+#REML
+
+##a.
+
+```{r, warning=FALSE}
+setwd("~/OneDrive/STA232B16")
+library(knitr)
+#setting up data
+corps = read.table("corps.txt", header = TRUE)
+chairman = factor(rep(1:50, each = 2))
+corps$chairman = chairman
+corps$year = as.factor(corps$year)
+
+#reml
+mod1 = nlme::lme(fixed = y ~ year + AGE + SHARES + REV + INC, random = ~ 1|chairman,
+                 data = corps, method = "REML")
+mod1l = lme4::lmer(formula = y ~ year + AGE + SHARES + REV + INC + (1|chairman),
+                   data = corps, REML = TRUE)
+summary(mod1)
+
+#estimators 
+sigma2 = HLMdiag::varcomp.mer(mod1l)[2] #nlme::getVarCov(mod1)
+tau2 = HLMdiag::varcomp.mer(mod1l)[1] # summary(mod1)$sigma^2
+varcomp = c(sigma2, tau2)
+names(varcomp) = c("sigma2", "tau2")
+kable(varcomp) #estimators for tau^2 and sigma^2 (according to project notation)
+nlme::fixef(mod1) #fixed estimators
+```
+
+##b. 
+Explain how the standard error obtained for the REML estimates of the fixed effects.
+Write some simple R code yourself to verify the standard error results.
+
+```{r}
+X = as.matrix(lme4::getME(mod1l, 'X'))
+Z = as.matrix(lme4::getME(mod1l, 'Z'))
+V = sigma2*Z %*% t(Z) + tau2 * diag(100)
+v = solve(V)
+covmatb = solve(t(X) %*% v %*% X)
+
+#Covariance Matrix
+kable(covmatb) #by matrix calculation
+kable(vcov(mod1)) #covariance matrix by R
+
+sqrt(diag(covmatb))
+sqrt(diag(vcov(mod1)))
+```
+
+##c.
+Explain two methods for obtaining the standard errors for the variance-component.
+
+ * Asymptotic Covariance Matrix
+    + We can find inverse of fisher information matrix which is aysmptotically equivalent to covariance Matrix.
+ * Bootstrapping Method
+    + We can use parameter bootstrap methods to simulate get many estimators. Then, we calculate standard error of bootstrapped estimators.
+ 
+##d.
+Compute Standard Error by ACM methods.
+```{r}
+#first find the fisher's information matrix
+P = v - v %*% X %*% solve(t(X) %*% v %*% X) %*% t(X) %*% v
+I = matrix(1:4, 2, 2)
+tmpZ = Z %*% t(Z)
+I[1,1] = 0.5 * sum(diag(P %*% tmpZ %*% P %*% tmpZ))
+I[1,2] = I[2,1] = 0.5 * sum(diag(P %*% P %*% tmpZ))
+I[2,2] = 0.5 * sum(diag(P %*% P))
+
+#get ACM
+acm = solve(I)
+seVCa = sqrt(diag(acm))
+names(seVCa) = c("se(sigma)", "se(tau)")
+kable(seVCa)
+```
+
+##e.
+Compute Standard Error by Bootstrapping
+
+```{r, warning=FALSE}
+beta = nlme::fixef(mod1)
+#sigma2 ,tau2
+set.seed(12043)
+newY = MASS::mvrnorm(100, X%*%beta, V) #each row has one sample, the number of row = sample size
+
+vcM = apply(newY, 1, function(x){
+  fit = lme4::lmer(formula = x ~ year + AGE + SHARES + REV + INC + (1|chairman),
+                   data = corps, REML = TRUE);
+  HLMdiag::varcomp.mer(fit)
+})
+tmp1 = apply(vcM, 1, mean)
+tmp2 = apply(vcM, 1, sd)
+#comparing to ACM
+seVCb = c(tmp2[2], tmp2[1])
+names(seVCb) = c("se(sigma)", "se(tau)")
+seVC_RM = rbind(seVCb, seVCa)
+row.names(seVC_RM) = c('boot', 'ACM')
+kable(seVC_RM)
+
+#beta
+betaM = apply(newY, 1, function(x){
+  fit = lme4::lmer(formula = x ~ year + AGE + SHARES + REV + INC + (1|chairman),
+                   data = corps, REML = TRUE);
+  lme4::fixef(fit);
+})
+apply(betaM, 1, mean)
+apply(betaM, 1, sd)
+
+```
+
+#ML
+
+##a. Obtain ML estimators
+
+```{r, warning=FALSE}
+#reml
+mod2 = nlme::lme(fixed = y ~ year + AGE + SHARES + REV + INC, random = ~ 1|chairman,
+                 data = corps, method = "ML")
+mod2l = lme4::lmer(formula = y ~ year + AGE + SHARES + REV + INC + (1|chairman),
+                   data = corps, REML = FALSE)
+#nlme::fixef(mod2)
+summary(mod2)
+
+#estimators 
+sigma2m = HLMdiag::varcomp.mer(mod2l)[2] #nlme::getVarCov(mod2)
+tau2m = HLMdiag::varcomp.mer(mod2l)[1] # summary(mod2)$sigma^2
+varcomp.m = c(sigma2m, tau2m)
+names(varcomp.m) = c("sigma2", "tau2")
+kable(varcomp.m) #estimators for tau^2 and sigma^2 (according to project notation)
+kable(varcomp)
+nlme::fixef(mod2) #fixed estimators
+```
+The ML fixed effect estimators are same as the REML fixed effect estimators; but the estimators of variance componants by ML and that by REML are different. (ML one is smaller)
+
+##d.
+Compute Standard Error by ACM methods.
+```{r}
+#first find the fisher's information matrix
+Vm = sigma2m*Z %*% t(Z) + tau2m * diag(100)
+vm = solve(Vm)
+Im = matrix(1:4, 2, 2)
+Im[1,1] = 0.5 * sum(diag(vm %*% tmpZ %*% vm %*% tmpZ))
+Im[1,2] = Im[2,1] = 0.5 * sum(diag(vm %*% vm %*% tmpZ))
+Im[2,2] = 0.5 * sum(diag(vm %*% vm))
+
+#get ACM
+acm.m = solve(Im)
+seVCa.m = sqrt(diag(acm.m))
+names(seVCa.m) = c("se(sigma)", "se(tau)")
+kable(seVCa.m)
+```
+
+##e.
+Compute Standard Error by Bootstrapping
+
+```{r, warning=FALSE}
+beta2 = nlme::fixef(mod2)
+#sigma2 ,tau2
+set.seed(12043)
+newY = MASS::mvrnorm(100, X%*%beta2, Vm) #each row has one sample, the number of row = sample size
+
+vcM.m = apply(newY, 1, function(x){
+  fit = lme4::lmer(formula = x ~ year + AGE + SHARES + REV + INC + (1|chairman),
+                   data = corps, REML = FALSE);
+  HLMdiag::varcomp.mer(fit)
+})
+tmp1.m = apply(vcM.m, 1, mean)
+tmp2.m = apply(vcM.m, 1, sd)
+
+#comparing to ACM
+seVCb.m = c(tmp2.m[2], tmp2.m[1])
+names(seVCb.m) = c("se(sigma)", "se(tau)")
+seVC_M = rbind(seVCb.m, seVCa.m)
+row.names(seVC_M) = c('boot', 'ACM')
+kable(seVC_M)
+
+#beta
+betaM.m = apply(newY, 1, function(x){
+  fit = lme4::lmer(formula = x ~ year + AGE + SHARES + REV + INC + (1|chairman),
+                   data = corps, REML = TRUE);
+  lme4::fixef(fit);
+})
+apply(betaM.m, 1, mean)
+apply(betaM.m, 1, sd)
+```
+
+
+
+## Appendix
+
+```{r, ref.label=knitr::all_labels(),echo=TRUE,eval=FALSE}
+```
